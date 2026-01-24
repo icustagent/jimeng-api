@@ -12,9 +12,28 @@ interface StoredSettings {
   region: Region
 }
 
+function normalizeBaseUrl(input: string): string {
+  const v = (input ?? '').trim()
+
+  // 空字串代表同源：請求會變成 /v1/...，交給 nginx 反代到後端
+  if (!v) return ''
+
+  // 自動遷移：舊版常見預設 http://localhost:5100
+  // 在「透過 GUI 入口（5173）+ nginx 反代」的部署模型下，localhost/127.0.0.1 會指向使用者自己的機器，應改為同源。
+  // （如果你真的想指定遠端 API，請填入 VPS 的 IP/網域，例如 http://192.168.1.100:5226）
+  const isLocalhost =
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/i.test(v) ||
+    /^https?:\/\/(localhost|127\.0\.0\.1):5100\/?$/i.test(v)
+
+  if (isLocalhost) return ''
+
+  // 避免輸入尾端斜線，導致後面拼接成 //v1/...
+  return v.replace(/\/+$/, '')
+}
+
 export const useSettingsStore = defineStore('settings', () => {
-  // State
-  const apiBaseUrl = ref('http://localhost:5100')
+  // State（預設改為同源）
+  const apiBaseUrl = ref('')
   const sessionId = ref('')
   const region = ref<Region>('cn')
 
@@ -34,7 +53,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // Actions
   function setConfig(config: Partial<StoredSettings>) {
-    if (config.apiBaseUrl !== undefined) apiBaseUrl.value = config.apiBaseUrl
+    if (config.apiBaseUrl !== undefined) apiBaseUrl.value = normalizeBaseUrl(config.apiBaseUrl)
     if (config.sessionId !== undefined) sessionId.value = config.sessionId
     if (config.region !== undefined) region.value = config.region
     saveToStorage()
@@ -45,7 +64,7 @@ export const useSettingsStore = defineStore('settings', () => {
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {
         const parsed: StoredSettings = JSON.parse(stored)
-        apiBaseUrl.value = parsed.apiBaseUrl || 'http://localhost:5100'
+        apiBaseUrl.value = normalizeBaseUrl(parsed.apiBaseUrl || '')
         sessionId.value = parsed.sessionId || ''
         region.value = parsed.region || 'cn'
       }
@@ -56,7 +75,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   function saveToStorage() {
     const settings: StoredSettings = {
-      apiBaseUrl: apiBaseUrl.value,
+      apiBaseUrl: normalizeBaseUrl(apiBaseUrl.value),
       sessionId: sessionId.value,
       region: region.value,
     }
@@ -64,7 +83,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   function clearConfig() {
-    apiBaseUrl.value = 'http://localhost:5100'
+    apiBaseUrl.value = ''
     sessionId.value = ''
     region.value = 'cn'
     localStorage.removeItem(STORAGE_KEY)
@@ -72,41 +91,36 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function generateNewSession(): Promise<{ success: boolean; message: string }> {
     try {
-      // Set API config for the request
       apiService.setConfig({
-        baseUrl: apiBaseUrl.value,
-        sessionId: sessionId.value || 'temp', // Use temp value for generation request
+        baseUrl: normalizeBaseUrl(apiBaseUrl.value),
+        sessionId: sessionId.value || 'temp',
         region: region.value,
       })
 
       const result = await apiService.generateSession()
-      
-      // Update the session ID with the new one
+
       sessionId.value = result.sessionId
       saveToStorage()
-      
+
       return {
         success: true,
-        message: result.message || 'Session ID 生成成功'
+        message: result.message || 'Session ID 生成成功',
       }
     } catch (error: any) {
       return {
         success: false,
-        message: error.message || 'Session ID 生成失败'
+        message: error.message || 'Session ID 生成失败',
       }
     }
   }
 
   return {
-    // State
     apiBaseUrl,
     sessionId,
     region,
-    // Getters
     isConfigured,
     formattedSessionId,
     authHeader,
-    // Actions
     setConfig,
     loadFromStorage,
     saveToStorage,
