@@ -6,7 +6,7 @@ services:
     container_name: jimeng-api
     restart: unless-stopped
     ports:
-      - "127.0.0.1:5100:5100"
+      - "5226:5100"
     environment:
       SERVER_PORT: "5100"
       PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright"
